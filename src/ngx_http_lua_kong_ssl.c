@@ -370,6 +370,11 @@ ngx_http_lua_kong_set_upstream_ssl(ngx_http_request_t *r, ngx_connection_t *c)
         SSL_set_verify_depth(sc, ctx->upstream_ssl_verify_depth);
     }
 
+    if (ctx->upstream_sni.len != 0) {
+        ngx_log_debug1(NGX_LOG_DEBUG_HTTP, c->log, 0,
+                       "set upstream SSL client host %s", ctx->upstream_sni.data);
+        SSL_add1_host(sc, ctx->upstream_sni.data);
+    }
 
     return;
 
@@ -504,6 +509,28 @@ ngx_http_lua_kong_ffi_set_upstream_ssl_verify(ngx_http_request_t *r,
 
     ctx->upstream_ssl_verify_set = 1;
     ctx->upstream_ssl_verify = verify;
+
+    return NGX_OK;
+}
+
+int
+ngx_http_lua_kong_ffi_set_upstream_ssl_sni(ngx_http_request_t *r,
+    char *sni)
+{
+    ngx_http_lua_kong_ctx_t     *ctx;
+
+    ctx = ngx_http_lua_kong_get_module_ctx(r);
+    if (ctx == NULL) {
+        return NGX_ERROR;
+    }
+
+    if (sni == NULL) {
+        return NGX_ERROR;
+    }
+
+    ctx->upstream_sni.data = ngx_pcalloc(r->pool, ngx_strlen(sni)+1);
+    ctx->upstream_sni.len = ngx_strlen(sni)+1;
+    ngx_memcpy(ctx->upstream_sni.data, sni, ctx->upstream_sni.len);
 
     return NGX_OK;
 }

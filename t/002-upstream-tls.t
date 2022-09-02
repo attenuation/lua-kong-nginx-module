@@ -5,7 +5,7 @@ use Cwd qw(cwd);
 
 repeat_each(2);
 
-plan tests => repeat_each() * (blocks() * 6);
+plan tests => repeat_each() * (blocks() * 6) - 6;
 
 my $pwd = cwd();
 
@@ -810,3 +810,146 @@ X509_check_host(): match
 [error]
 [crit]
 [alert]
+
+
+
+=== TEST 14: sending client certificate using resty.kong.tls.set_upstream_cert_and_key and set_upstream_ssl_sni access phase
+--- http_config
+    lua_package_path "../lua-resty-core/lib/?.lua;lualib/?.lua;;";
+
+    server {
+        listen unix:$TEST_NGINX_HTML_DIR/nginx.sock ssl;
+        server_name   example.com;
+        ssl_certificate ../../cert/example.com.crt;
+        ssl_certificate_key ../../cert/example.com.key;
+        ssl_client_certificate ../../cert/ca.crt;
+        ssl_verify_client on;
+
+        server_tokens off;
+
+        location /foo {
+            default_type 'text/plain';
+            more_clear_headers Date;
+            echo 'it works!';
+        }
+    }
+--- config
+    server_tokens off;
+
+    location /t {
+        access_by_lua_block {
+            local tls = require("resty.kong.tls")
+            local ssl = require("ngx.ssl")
+
+            local f = assert(io.open("t/cert/client_example.com.crt"))
+            local cert_data = f:read("*a")
+            f:close()
+
+            local chain = assert(ssl.parse_pem_cert(cert_data))
+
+            f = assert(io.open("t/cert/client_example.com.key"))
+            local key_data = f:read("*a")
+            f:close()
+
+            local key = assert(ssl.parse_pem_priv_key(key_data))
+
+            local ok, err = tls.set_upstream_cert_and_key(chain, key)
+            if not ok then
+                ngx.say("set_upstream_cert_and_key failed: ", err)
+            end
+            local ok, err = tls.set_upstream_ssl_sni("example.com")
+            if not ok then
+                ngx.say("set_upstream_ssl_sni failed: ", err)
+            end
+        }
+
+        proxy_ssl_trusted_certificate ../../cert/ca.crt;
+        proxy_ssl_verify on;
+        proxy_ssl_name example.com;
+        proxy_ssl_session_reuse off;
+        proxy_pass https://unix:$TEST_NGINX_HTML_DIR/nginx.sock:/foo;
+    }
+
+--- request
+GET /t
+--- response_body_like
+it works!
+
+--- error_log
+verify:1, error:0, depth:0, subject:"/C=US/ST=California/O=Kong Testing/CN=foo@example.com", issuer:"/C=US/ST=California/O=Kong Testing/CN=Kong Testing Intermidiate CA"
+
+--- error_code: 200
+--- no_error_log
+[error]
+[crit]
+[alert]
+
+
+
+=== TEST 15: sending client certificate using resty.kong.tls.set_upstream_cert_and_key and set_upstream_ssl_sni error sni access phase
+--- http_config
+    lua_package_path "../lua-resty-core/lib/?.lua;lualib/?.lua;;";
+
+    server {
+        listen unix:$TEST_NGINX_HTML_DIR/nginx.sock ssl;
+        server_name   example.com;
+        ssl_certificate ../../cert/example.com.crt;
+        ssl_certificate_key ../../cert/example.com.key;
+        ssl_client_certificate ../../cert/ca.crt;
+        ssl_verify_client on;
+
+        server_tokens off;
+
+        location /foo {
+            default_type 'text/plain';
+            more_clear_headers Date;
+            echo 'it works!';
+        }
+    }
+--- config
+    server_tokens off;
+
+    location /t {
+        access_by_lua_block {
+            local tls = require("resty.kong.tls")
+            local ssl = require("ngx.ssl")
+
+            local f = assert(io.open("t/cert/client_example.com.crt"))
+            local cert_data = f:read("*a")
+            f:close()
+
+            local chain = assert(ssl.parse_pem_cert(cert_data))
+
+            f = assert(io.open("t/cert/client_example.com.key"))
+            local key_data = f:read("*a")
+            f:close()
+
+            local key = assert(ssl.parse_pem_priv_key(key_data))
+
+            local ok, err = tls.set_upstream_cert_and_key(chain, key)
+            if not ok then
+                ngx.say("set_upstream_cert_and_key failed: ", err)
+            end
+            local ok, err = tls.set_upstream_ssl_sni("a.example.com")
+            if not ok then
+                ngx.say("set_upstream_ssl_sni failed: ", err)
+            end
+        }
+
+        proxy_ssl_trusted_certificate ../../cert/ca.crt;
+        proxy_ssl_verify on;
+        proxy_ssl_name example.com;
+        proxy_ssl_session_reuse off;
+        proxy_pass https://unix:$TEST_NGINX_HTML_DIR/nginx.sock:/foo;
+    }
+
+--- request
+GET /t
+--- response_body_like
+.+502 Bad Gateway.+
+
+--- error_log
+upstream SSL certificate verify error: (62:Hostname mismatch)
+
+--- error_code: 502
+--- no_error_log

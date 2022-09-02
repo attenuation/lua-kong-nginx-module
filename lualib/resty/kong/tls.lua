@@ -35,6 +35,8 @@ if ngx.config.subsystem == "http" then
         int verify);
     int ngx_http_lua_kong_ffi_set_upstream_ssl_verify_depth(ngx_http_request_t *r,
         int depth);
+    int ngx_http_lua_kong_ffi_set_upstream_ssl_sni(ngx_http_request_t *r,
+        char *sni);
     ]])
 
 else
@@ -256,6 +258,33 @@ if ngx.config.subsystem == "http" then
 
             if ret == NGX_ERROR then
                 return nil, "error while setting upstream ssl verify depth"
+            end
+
+            error("unknown return code: " .. tostring(ret))
+        end
+
+        function _M.set_upstream_ssl_sni(sni)
+            if not ALLOWED_PHASES[get_phase()] then
+                error("API disabled in the current context", 2)
+            end
+
+            if type(sni) ~= 'string' then
+                error("depth expects a number but found " .. type(sni), 2)
+            end
+
+            local c_sni = ffi.new("char[?]", #sni + 1)
+            ffi.copy(c_sni, sni)
+
+            local r = get_request()
+
+            local ret = C.ngx_http_lua_kong_ffi_set_upstream_ssl_sni(
+                r, c_sni)
+            if ret == NGX_OK then
+                return true
+            end
+
+            if ret == NGX_ERROR then
+                return nil, "error while setting upstream ssl sni"
             end
 
             error("unknown return code: " .. tostring(ret))
